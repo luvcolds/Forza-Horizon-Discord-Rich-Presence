@@ -75,17 +75,25 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Start Minimized Setting
   const startMinimizedCheck = document.getElementById("start-minimized-check");
+  const autoUpdateCheck = document.getElementById("auto-update-check");
   
   // Default values
   const hasRunBefore = localStorage.getItem("has_run_before");
+  
   let startMinimized = localStorage.getItem("start_minimized");
-
   if (startMinimized === null) {
     startMinimized = "true";
     localStorage.setItem("start_minimized", "true");
   }
 
+  let autoUpdate = localStorage.getItem("auto_update");
+  if (autoUpdate === null) {
+    autoUpdate = "true";
+    localStorage.setItem("auto_update", "true");
+  }
+
   startMinimizedCheck.checked = startMinimized === "true";
+  autoUpdateCheck.checked = autoUpdate === "true";
 
   if (!hasRunBefore) {
     // First run: keep window visible
@@ -95,8 +103,18 @@ document.addEventListener("DOMContentLoaded", () => {
     invoke("hide_window").catch(console.error);
   }
 
+  // Automatic update on startup
+  if (autoUpdate === "true") {
+    // We can just trigger a click on the button or call the function
+    updateDbBtn.click();
+  }
+
   startMinimizedCheck.addEventListener("change", (e) => {
     localStorage.setItem("start_minimized", e.target.checked.toString());
+  });
+
+  autoUpdateCheck.addEventListener("change", (e) => {
+    localStorage.setItem("auto_update", e.target.checked.toString());
   });
 
   // Listen for status updates from Rust backend
