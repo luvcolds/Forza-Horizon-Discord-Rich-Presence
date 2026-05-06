@@ -17,34 +17,35 @@ use tokio::sync::broadcast;
 
 use database::CarDatabase;
 use discord::DiscordService;
-use modules::{fh4::FH4Module, GameModule};
+use modules::{fh4::FH4Module, fh5::FH5Module, GameModule};
 use telemetry::TelemetryServer;
 
 struct AppState {
     db: Arc<Mutex<CarDatabase>>,
-    game_module: Arc<dyn GameModule>,
+    modules: Vec<Arc<dyn GameModule>>,
 }
 
 #[tauri::command]
 async fn fix_uwp_isolation(state: tauri::State<'_, AppState>) -> Result<String, String> {
-    let package_name = state.game_module.uwp_package_name();
-    
-    // Command to exempt UWP app from loopback isolation.
-    // Needs elevation. We use tauri-plugin-shell or std::process.
-    // To ask for elevation on Windows without external crates, we can use powershell Start-Process -Verb RunAs
-    let status = std::process::Command::new("powershell")
-        .args(&[
-            "-Command",
-            &format!("Start-Process -FilePath 'CheckNetIsolation.exe' -ArgumentList 'LoopbackExempt -a -n={}' -Verb RunAs -WindowStyle Hidden", package_name)
-        ])
-        .status()
-        .map_err(|e| e.to_string())?;
+    for module in &state.modules {
+        let package_name = module.uwp_package_name();
+        if package_name.is_empty() { continue; }
+        
+        // Command to exempt UWP app from loopback isolation.
+        let status = std::process::Command::new("powershell")
+            .args(&[
+                "-Command",
+                &format!("Start-Process -FilePath 'CheckNetIsolation.exe' -ArgumentList 'LoopbackExempt -a -n={}' -Verb RunAs -WindowStyle Hidden", package_name)
+            ])
+            .status()
+            .map_err(|e| e.to_string())?;
 
-    if status.success() {
-        Ok("Isolation fixed".into())
-    } else {
-        Err("Failed to execute command".into())
+        if !status.success() {
+            return Err(format!("Failed to fix isolation for {}", module.game_name()));
+        }
     }
+    
+    Ok("Isolation fixed for all supported games".into())
 }
 
 #[tauri::command]
@@ -54,11 +55,6 @@ async fn check_db_updates(app: tauri::AppHandle) -> Result<String, String> {
 
 #[tauri::command]
 async fn check_uwp_status(state: tauri::State<'_, AppState>) -> Result<bool, String> {
-    let package_name = state.game_module.uwp_package_name().to_lowercase();
-    if package_name.is_empty() {
-        return Ok(true); // No UWP fix needed for this game
-    }
-
     let output = std::process::Command::new("CheckNetIsolation")
         .arg("LoopbackExempt")
         .arg("-s")
@@ -68,12 +64,17 @@ async fn check_uwp_status(state: tauri::State<'_, AppState>) -> Result<bool, Str
 
     let output_str = String::from_utf8_lossy(&output.stdout).to_lowercase();
     
-    // If the package name is explicitly found in the output, it's exempt
-    if output_str.contains(&package_name) {
-        return Ok(true);
+    // Check if ALL packages are exempt
+    for module in &state.modules {
+        let package_name = module.uwp_package_name().to_lowercase();
+        if package_name.is_empty() { continue; }
+        
+        if !output_str.contains(&package_name) {
+            return Ok(false); // At least one game needs fixing
+        }
     }
     
-    Ok(false)
+    Ok(true)
 }
 
 #[tauri::command]
@@ -171,74 +172,85 @@ fn main() {
             let app_handle = app.handle().clone();
             
             let db = Arc::new(Mutex::new(CarDatabase::new(&app_handle)));
-            let game_module: Arc<dyn GameModule> = Arc::new(FH4Module);
+            let modules: Vec<Arc<dyn GameModule>> = vec![
+                Arc::new(FH4Module),
+                Arc::new(FH5Module),
+            ];
 
             app.manage(AppState {
                 db: db.clone(),
-                game_module: game_module.clone(),
+                modules: modules.clone(),
             });
 
             // Start background monitor task
-            let module = game_module.clone();
             let app_handle_clone = app_handle.clone();
             
             tauri::async_runtime::spawn(async move {
                 let mut sys = System::new_all();
                 let server = Arc::new(TelemetryServer::new());
-                let discord_service = Arc::new(DiscordService::new(module.discord_client_id()));
                 
                 let (tx, mut rx) = broadcast::channel(16);
                 let mut is_game_running = false;
-
-                // Handle telemetry data
-                let db_clone = db.clone();
-                let discord_clone = discord_service.clone();
-                tauri::async_runtime::spawn(async move {
-                    let mut last_update = tokio::time::Instant::now();
-                    
-                    while let Ok(data) = rx.recv().await {
-                        // Rate limit Discord updates to once per second
-                        if last_update.elapsed() >= Duration::from_millis(1000) {
-                            let db_lock = db_clone.lock().unwrap();
-                            discord_clone.update_presence(&data, &db_lock);
-                            last_update = tokio::time::Instant::now();
-                        }
-                    }
-                });
+                let mut active_discord: Option<Arc<DiscordService>> = None;
 
                 loop {
                     sys.refresh_processes();
-                    let process_name = module.target_process_name();
-                    let mut found = false;
-
-                    for process in sys.processes().values() {
-                        if process.name() == process_name {
-                            found = true;
-                            break;
+                    
+                    let mut active_module: Option<Arc<dyn GameModule>> = None;
+                    for module in &modules {
+                        let process_name = module.target_process_name();
+                        for process in sys.processes().values() {
+                            if process.name() == process_name {
+                                active_module = Some(module.clone());
+                                break;
+                            }
                         }
+                        if active_module.is_some() { break; }
                     }
 
-                    if found && !is_game_running {
-                        // Game started
-                        is_game_running = true;
-                        println!("Game started: {}", process_name);
-                        
-                        let _ = discord_service.connect();
-                        server.start(9909, tx.clone());
+                    if let Some(module) = active_module {
+                        if !is_game_running {
+                            // Game started
+                            is_game_running = true;
+                            println!("Game started: {}", module.game_name());
+                            
+                            let discord_service = Arc::new(DiscordService::new(module.discord_client_id()));
+                            let _ = discord_service.connect();
+                            active_discord = Some(discord_service.clone());
+                            
+                            server.start(9909, tx.clone());
 
-                        let _ = app_handle_clone.emit("status_update", serde_json::json!({
-                            "status": "connected",
-                            "game": module.game_name(),
-                            "details": "Broadcasting presence..."
-                        }));
-
-                    } else if !found && is_game_running {
+                            let _ = app_handle_clone.emit("status_update", serde_json::json!({
+                                "status": "connected",
+                                "game": module.game_name(),
+                                "details": "Broadcasting presence..."
+                            }));
+                            
+                            // Spawn Discord updater loop
+                            let db_clone = db.clone();
+                            let module_clone = module.clone();
+                            let mut rx_clone = tx.subscribe();
+                            
+                            tauri::async_runtime::spawn(async move {
+                                let mut last_update = tokio::time::Instant::now();
+                                while let Ok(data) = rx_clone.recv().await {
+                                    if last_update.elapsed() >= Duration::from_millis(2000) {
+                                        let db_lock = db_clone.lock().unwrap();
+                                        discord_service.update_presence(&data, &db_lock, module_clone.as_ref());
+                                        last_update = tokio::time::Instant::now();
+                                    }
+                                }
+                            });
+                        }
+                    } else if is_game_running {
                         // Game stopped
                         is_game_running = false;
                         println!("Game stopped.");
                         
                         server.stop();
-                        discord_service.disconnect();
+                        if let Some(discord) = active_discord.take() {
+                            discord.disconnect();
+                        }
 
                         let _ = app_handle_clone.emit("status_update", serde_json::json!({
                             "status": "disconnected",

@@ -2,6 +2,7 @@ use discord_rich_presence::{activity, DiscordIpc, DiscordIpcClient};
 use std::sync::Mutex;
 use crate::telemetry::TelemetryData;
 use crate::database::CarDatabase;
+use crate::modules::GameModule;
 
 pub struct DiscordService {
     client: Mutex<Option<DiscordIpcClient>>,
@@ -33,7 +34,7 @@ impl DiscordService {
         }
     }
 
-    pub fn update_presence(&self, data: &TelemetryData, db: &CarDatabase) {
+    pub fn update_presence(&self, data: &TelemetryData, db: &CarDatabase, module: &dyn GameModule) {
         let mut lock = self.client.lock().unwrap();
         if let Some(client) = lock.as_mut() {
             if data.is_race_on == 0 {
@@ -46,17 +47,7 @@ impl DiscordService {
             }
 
             let car_name = db.get_car_name(data.car_ordinal);
-            let class_str = match data.car_class {
-                0 => "E",
-                1 => "D",
-                2 => "C",
-                3 => "B",
-                4 => "A",
-                5 => "S1",
-                6 => "S2",
-                7 => "X",
-                _ => "Unknown",
-            };
+            let class_str = module.format_class(data.car_class);
             
             let details = format!("{}", car_name);
             let state = format!("{:.0} km/h | Class {} ({})", data.speed_kmh.abs(), class_str, data.car_pi);
