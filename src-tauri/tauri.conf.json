@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Forza Rich Presence",
+  "productName": "forzarpc",
   "version": "0.1.0",
   "identifier": "com.forzarp.app",
   "build": {

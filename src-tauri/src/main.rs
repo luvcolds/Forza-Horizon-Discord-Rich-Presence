@@ -88,7 +88,7 @@ fn toggle_autostart(enable: bool) -> Result<String, String> {
     let exe_path_str = exe_path.to_str().unwrap_or_default();
     
     let key_path = r#"HKCU\Software\Microsoft\Windows\CurrentVersion\Run"#;
-    let app_name = "ForzaRP";
+    let app_name = "forzarpc";
 
     if enable {
         let status = std::process::Command::new("reg")
@@ -112,7 +112,7 @@ fn toggle_autostart(enable: bool) -> Result<String, String> {
 #[tauri::command]
 fn is_autostart_enabled() -> Result<bool, String> {
     let key_path = r#"HKCU\Software\Microsoft\Windows\CurrentVersion\Run"#;
-    let app_name = "ForzaRP";
+    let app_name = "forzarpc";
     
     let output = std::process::Command::new("reg")
         .args(&["query", key_path, "/v", app_name])
