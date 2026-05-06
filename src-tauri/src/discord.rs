@@ -7,13 +7,20 @@ use crate::modules::GameModule;
 pub struct DiscordService {
     client: Mutex<Option<DiscordIpcClient>>,
     client_id: String,
+    start_time: i64,
 }
 
 impl DiscordService {
     pub fn new(client_id: &str) -> Self {
+        let start_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
         Self {
             client: Mutex::new(None),
             client_id: client_id.to_string(),
+            start_time,
         }
     }
 
@@ -42,7 +49,8 @@ impl DiscordService {
                 // In menus
                 let activity = activity::Activity::new()
                     .state("In Menus")
-                    .assets(activity::Assets::new().large_image("menu_icon"));
+                    .assets(activity::Assets::new().large_image("menu_icon"))
+                    .timestamps(activity::Timestamps::new().start(self.start_time));
                 let _ = client.set_activity(activity);
                 return;
             }
@@ -58,7 +66,8 @@ impl DiscordService {
                 .state(&state)
                 .assets(activity::Assets::new()
                     .large_image("car_default") // In a real app, you could map car IDs to asset keys
-                    .large_text(&car_name));
+                    .large_text(&car_name))
+                .timestamps(activity::Timestamps::new().start(self.start_time));
 
             let _ = client.set_activity(payload);
         }
