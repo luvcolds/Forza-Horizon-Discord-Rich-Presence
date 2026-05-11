@@ -45,6 +45,22 @@ impl DiscordService {
     pub fn update_presence(&self, data_opt: Option<&TelemetryData>, db: &CarDatabase, module: &dyn GameModule, xbl_state: Option<&str>) {
         let mut lock = self.client.lock().unwrap();
         if let Some(client) = lock.as_mut() {
+            let valid_xbl_state = xbl_state.and_then(|s| {
+                let s = s.trim();
+                let s_lower = s.to_lowercase();
+                if s_lower.starts_with("error:") 
+                    || s_lower.starts_with("api error")
+                    || s_lower.starts_with("network error")
+                    || s == "Connected (No Activity)"
+                    || s == "Connecting..."
+                    || s == "Disconnected"
+                    || s == "Waiting for game..." {
+                    None
+                } else {
+                    Some(s)
+                }
+            });
+
             let mut details_str = String::new(); // Top line
             let mut state_str = String::new();   // Bottom line
             let mut payload = activity::Activity::new()
@@ -66,7 +82,7 @@ impl DiscordService {
                 let class_str = module.format_class(data.car_class);
                 let telemetry_str = format!("{} | {} ({})", display_name, class_str, data.car_pi);
 
-                if let Some(xbl) = xbl_state {
+                if let Some(xbl) = valid_xbl_state {
                     details_str = xbl.to_string();
                     if data.is_race_on != 0 {
                         state_str = telemetry_str;
@@ -83,7 +99,7 @@ impl DiscordService {
 
                 if data.is_race_on == 0 {
                     assets = assets.large_image(module.logo_asset_key());
-                    if let Some(xbl) = xbl_state {
+                    if let Some(xbl) = valid_xbl_state {
                         details_str = xbl.to_string();
                         assets = assets.large_text(xbl);
                     }
@@ -91,13 +107,13 @@ impl DiscordService {
                     assets = assets.large_image(module.logo_asset_key())
                         .small_image(&class_key)
                         .small_text(&hover_text);
-                    if let Some(xbl) = xbl_state {
+                    if let Some(xbl) = valid_xbl_state {
                         assets = assets.large_text(xbl);
                     }
                 }
             } else {
                 // No telemetry data
-                if let Some(xbl) = xbl_state {
+                if let Some(xbl) = valid_xbl_state {
                     details_str = xbl.to_string();
                     assets = assets.large_image(module.logo_asset_key()).large_text(xbl);
                 } else {
