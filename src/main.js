@@ -223,12 +223,12 @@ document.addEventListener("DOMContentLoaded", () => {
     // Port Settings
     const portInput = document.getElementById("telemetry-port");
     const portSavedIndicator = document.getElementById("port-saved-indicator");
-    let savedPort = localStorage.getItem("telemetry_port") || "9909";
+    let savedPort = localStorage.getItem("telemetry_port") || "8001";
     portInput.value = savedPort;
 
     portInput.addEventListener("blur", async () => {
-      const portVal = parseInt(portInput.value) || 9909;
-      const currentSavedPort = localStorage.getItem("telemetry_port") || "9909";
+      const portVal = parseInt(portInput.value) || 8001;
+      const currentSavedPort = localStorage.getItem("telemetry_port") || "8001";
       
       // Only save if changed
       if (portVal.toString() !== currentSavedPort) {
@@ -247,10 +247,109 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
 
+    // UDP Forwarding Panel
+    const udpForwardBtn = document.getElementById("udp-forward-btn");
+    const udpForwardPanel = document.getElementById("udp-forward-panel");
+    const relayIpInput = document.getElementById("relay-ip");
+    const relayPortInput = document.getElementById("relay-port");
+    const relaySavedIndicator = document.getElementById("relay-saved-indicator");
+
+    // Restore saved values
+    const savedRelayIp = localStorage.getItem("relay_ip") || "127.0.0.1";
+    const savedRelayPort = localStorage.getItem("relay_port") || "8000";
+    const relayEnabled = localStorage.getItem("relay_enabled") === "true";
+
+    relayIpInput.value = savedRelayIp;
+    relayPortInput.value = savedRelayPort;
+
+    const BASE_HEIGHT = 365; // must match tauri.conf.json "height"
+    const tauriWindow = window.__TAURI__.window;
+    const getCurrentWindow = tauriWindow.getCurrentWindow;
+    // LogicalSize may live in .window or .dpi depending on Tauri 2 minor version
+    const LogicalSize = tauriWindow.LogicalSize ?? window.__TAURI__.dpi?.LogicalSize;
+    const appWindow = getCurrentWindow();
+
+    async function setWindowHeight(height) {
+      try {
+        await appWindow.setSize(new LogicalSize(530, height));
+      } catch (e) {
+        console.error("Failed to resize window:", e);
+      }
+    }
+
+    // Restore panel visibility + window height
+    if (relayEnabled) {
+      udpForwardPanel.classList.remove("hidden");
+      udpForwardBtn.classList.add("active");
+      // Measure panel height after it becomes visible, then expand window
+      requestAnimationFrame(() => {
+        const panelH = udpForwardPanel.offsetHeight;
+        setWindowHeight(BASE_HEIGHT + panelH + 25); // extra gap
+      });
+    }
+
+    // Gear button toggle
+    udpForwardBtn.addEventListener("click", () => {
+      const isOpen = !udpForwardPanel.classList.contains("hidden");
+      if (isOpen) {
+        // Collapse: shrink window first, then hide panel
+        setWindowHeight(BASE_HEIGHT).then(() => {
+          udpForwardPanel.classList.add("hidden");
+        });
+        udpForwardBtn.classList.remove("active");
+        localStorage.setItem("relay_enabled", "false");
+        // Disable relay when panel is closed
+        invoke("update_relay_ports", { targets: [] }).catch(console.error);
+      } else {
+        // Expand: show panel, then measure and grow window
+        udpForwardPanel.classList.remove("hidden");
+        udpForwardBtn.classList.add("active");
+        localStorage.setItem("relay_enabled", "true");
+        requestAnimationFrame(() => {
+          const panelH = udpForwardPanel.offsetHeight;
+          setWindowHeight(BASE_HEIGHT + panelH + 25);
+        });
+        // Apply current values immediately
+        applyRelaySettings();
+      }
+    });
+
+    async function applyRelaySettings() {
+      const ip = relayIpInput.value.trim() || "127.0.0.1";
+      const port = parseInt(relayPortInput.value) || 8000;
+      if (port < 1 || port > 65535) return;
+
+      try {
+        await invoke("update_relay_ports", { targets: [{ ip, port }] });
+        relaySavedIndicator.classList.add("visible");
+        setTimeout(() => relaySavedIndicator.classList.remove("visible"), 2000);
+      } catch (err) {
+        console.error("Failed to apply relay settings:", err);
+      }
+    }
+
+    relayIpInput.addEventListener("blur", async () => {
+      if (!udpForwardPanel.classList.contains("hidden")) {
+        localStorage.setItem("relay_ip", relayIpInput.value.trim() || "127.0.0.1");
+        await applyRelaySettings();
+      }
+    });
+
+    relayPortInput.addEventListener("blur", async () => {
+      if (!udpForwardPanel.classList.contains("hidden")) {
+        localStorage.setItem("relay_port", relayPortInput.value.trim() || "8000");
+        await applyRelaySettings();
+      }
+    });
+
     // Tell backend we are ready to receive initial status and send initial key
     invoke("ui_ready").catch(console.error);
     invoke("update_xbl_settings", { apiKey: savedXblKey }).catch(console.error);
-    invoke("update_telemetry_port", { port: parseInt(savedPort) }).catch(console.error);
+    invoke("update_telemetry_port", { port: parseInt(savedPort) || 8001 }).catch(console.error);
+    // Apply saved relay settings on startup if enabled
+    if (relayEnabled) {
+      applyRelaySettings().catch(console.error);
+    }
   });
 
   // Handle external links

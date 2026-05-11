@@ -25,6 +25,16 @@ impl TelemetryServer {
     }
 
     pub fn start(&self, port: u16, tx: broadcast::Sender<TelemetryData>) {
+        self.start_with_relay(port, tx, vec![]);
+    }
+
+    /// Start the telemetry server with optional relay forwarding.
+    ///
+    /// If `forward_addrs` is non-empty, every raw UDP packet received from Forza
+    /// will be forwarded to each address ("ip:port" strings). This lets SimHub
+    /// (or any other tool) receive the telemetry stream even though this app
+    /// owns the primary UDP socket — eliminating the port conflict entirely.
+    pub fn start_with_relay(&self, port: u16, tx: broadcast::Sender<TelemetryData>, forward_addrs: Vec<String>) {
         if self.is_running.load(Ordering::SeqCst) {
             return;
         }
@@ -34,26 +44,26 @@ impl TelemetryServer {
 
         std::thread::spawn(move || {
             // Use socket2 to set SO_REUSEADDR before bind.
-            // This allows SimHub and other apps to listen on the same port
-            // simultaneously — each process receives its own copy of incoming UDP packets.
+            // This is required so that if SimHub starts BEFORE this app, we can
+            // still bind to the same port (Windows requires both sides to opt-in).
             let raw_socket = match Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP)) {
                 Ok(s) => s,
                 Err(e) => {
-                    eprintln!("Failed to create UDP socket: {}", e);
+                    eprintln!("[Telemetry] Failed to create UDP socket: {}", e);
                     is_running_clone.store(false, Ordering::SeqCst);
                     return;
                 }
             };
 
             if let Err(e) = raw_socket.set_reuse_address(true) {
-                eprintln!("Failed to set SO_REUSEADDR: {}", e);
+                eprintln!("[Telemetry] Failed to set SO_REUSEADDR: {}", e);
             }
 
             // Bind to 0.0.0.0 — Forza may send packets to the real adapter IP,
             // not just 127.0.0.1.
             let addr: SocketAddr = format!("0.0.0.0:{}", port).parse().unwrap();
             if let Err(e) = raw_socket.bind(&addr.into()) {
-                eprintln!("Failed to bind UDP socket on port {}: {}", port, e);
+                eprintln!("[Telemetry] Failed to bind UDP socket on port {}: {}", port, e);
                 is_running_clone.store(false, Ordering::SeqCst);
                 return;
             }
@@ -64,15 +74,44 @@ impl TelemetryServer {
                 .set_read_timeout(Some(std::time::Duration::from_millis(1000)))
                 .unwrap();
 
+            // Create a separate outbound socket for relaying packets to SimHub.
+            // Bound to port 0 (OS picks an ephemeral port), used only for sending.
+            let relay_socket = if !forward_addrs.is_empty() {
+                match UdpSocket::bind("0.0.0.0:0") {
+                    Ok(s) => {
+                        println!("[Telemetry] Relay active: forwarding packets to {:?}", forward_addrs);
+                        Some(s)
+                    }
+                    Err(e) => {
+                        eprintln!("[Telemetry] Failed to create relay socket: {}", e);
+                        None
+                    }
+                }
+            } else {
+                None
+            };
+
             let mut buf = [0u8; 512];
 
             while is_running_clone.load(Ordering::SeqCst) {
-                if let Ok((size, _)) = socket.recv_from(&mut buf) {
-                    // Forza Horizon 4/5 Data Out (Dash v2) packet is typically 324 or 311 bytes
-                    if size >= 311 {
-                        let data = Self::parse_packet(&buf);
-                        let _ = tx.send(data);
+                match socket.recv_from(&mut buf) {
+                    Ok((size, _src)) => {
+                        // Forward raw bytes to each configured address.
+                        if let Some(ref relay) = relay_socket {
+                            for dest in &forward_addrs {
+                                if let Err(e) = relay.send_to(&buf[..size], dest.as_str()) {
+                                    eprintln!("[Telemetry] Relay send error to {}: {}", dest, e);
+                                }
+                            }
+                        }
+
+                        // Forza Horizon 4/5 Data Out (Dash v2) packet is typically 311-324 bytes
+                        if size >= 311 {
+                            let data = Self::parse_packet(&buf);
+                            let _ = tx.send(data);
+                        }
                     }
+                    Err(_) => {} // Timeout — loop back and check is_running
                 }
             }
         });

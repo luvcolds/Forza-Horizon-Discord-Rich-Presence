@@ -21,6 +21,12 @@ use discord::DiscordService;
 use modules::{fh4::FH4Module, fh5::FH5Module, GameModule};
 use telemetry::{TelemetryServer, TelemetryData};
 
+#[derive(Clone, serde::Deserialize)]
+struct RelayTarget {
+    ip: String,
+    port: u16,
+}
+
 struct AppState {
     modules: Vec<Arc<dyn GameModule>>,
     active_game: Arc<Mutex<Option<String>>>,
@@ -28,6 +34,9 @@ struct AppState {
     telemetry_port: Arc<Mutex<u16>>,
     telemetry_server: Arc<TelemetryServer>,
     telemetry_tx: Arc<Mutex<Option<broadcast::Sender<TelemetryData>>>>,
+    /// Targets to relay raw Forza UDP packets to (ip + port).
+    /// Allows coexistence with SimHub without a port conflict.
+    relay_targets: Arc<Mutex<Vec<RelayTarget>>>,
 }
 
 #[tauri::command]
@@ -153,13 +162,34 @@ fn update_telemetry_port(port: u16, state: tauri::State<'_, AppState>) {
         return;
     }
     *current_port = port;
-    
+
     let tx_guard = state.telemetry_tx.lock().unwrap();
     if let Some(tx) = tx_guard.as_ref() {
+        let addrs = relay_addrs(&state.relay_targets.lock().unwrap());
         state.telemetry_server.stop();
-        std::thread::sleep(std::time::Duration::from_millis(1500)); // wait for socket to unbind (recv timeout is 1s)
-        state.telemetry_server.start(port, tx.clone());
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        state.telemetry_server.start_with_relay(port, tx.clone(), addrs);
     }
+}
+
+/// Set targets (ip:port) that raw Forza UDP packets should be relayed to.
+/// Allows coexistence with SimHub or any other tool without a port conflict.
+#[tauri::command]
+fn update_relay_ports(targets: Vec<RelayTarget>, state: tauri::State<'_, AppState>) {
+    *state.relay_targets.lock().unwrap() = targets.clone();
+
+    let tx_guard = state.telemetry_tx.lock().unwrap();
+    if let Some(tx) = tx_guard.as_ref() {
+        let addrs = relay_addrs(&targets);
+        let port = *state.telemetry_port.lock().unwrap();
+        state.telemetry_server.stop();
+        std::thread::sleep(std::time::Duration::from_millis(1500));
+        state.telemetry_server.start_with_relay(port, tx.clone(), addrs);
+    }
+}
+
+fn relay_addrs(targets: &[RelayTarget]) -> Vec<String> {
+    targets.iter().map(|t| format!("{}:{}", t.ip, t.port)).collect()
 }
 
 #[tauri::command]
@@ -273,9 +303,10 @@ fn main() {
 
             let active_game = Arc::new(Mutex::new(None));
             let xbl_api_key = Arc::new(Mutex::new(String::new()));
-            let telemetry_port = Arc::new(Mutex::new(9909));
+            let telemetry_port = Arc::new(Mutex::new(8001u16));
             let telemetry_server = Arc::new(TelemetryServer::new());
             let telemetry_tx: Arc<Mutex<Option<broadcast::Sender<TelemetryData>>>> = Arc::new(Mutex::new(None));
+            let relay_targets: Arc<Mutex<Vec<RelayTarget>>> = Arc::new(Mutex::new(vec![]));
             
             app.manage(AppState {
                 modules: modules.clone(),
@@ -284,6 +315,7 @@ fn main() {
                 telemetry_port: telemetry_port.clone(),
                 telemetry_server: telemetry_server.clone(),
                 telemetry_tx: telemetry_tx.clone(),
+                relay_targets: relay_targets.clone(),
             });
 
             // Start background monitor task
@@ -292,6 +324,7 @@ fn main() {
             let telemetry_port_clone = telemetry_port.clone();
             let telemetry_server_clone = telemetry_server.clone();
             let telemetry_tx_clone = telemetry_tx.clone();
+            let relay_targets_clone = relay_targets.clone();
             
             tauri::async_runtime::spawn(async move {
                 let mut sys = System::new();
@@ -328,7 +361,8 @@ fn main() {
                             active_discord = Some(discord_service.clone());
                             
                             let port = *telemetry_port_clone.lock().unwrap();
-                            telemetry_server_clone.start(port, tx.clone());
+                            let addrs = relay_addrs(&relay_targets_clone.lock().unwrap());
+                            telemetry_server_clone.start_with_relay(port, tx.clone(), addrs);
                             *telemetry_tx_clone.lock().unwrap() = Some(tx.clone());
 
                             let _ = app_handle_clone.emit("status_update", serde_json::json!({
@@ -478,7 +512,8 @@ fn main() {
             ui_ready,
             update_xbl_settings,
             open_url,
-            update_telemetry_port
+            update_telemetry_port,
+            update_relay_ports
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

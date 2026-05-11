@@ -503,7 +503,87 @@ footer {
   text-align: center;
   color: var(--text-dim);
   font-size: 0.75rem;
-  margin-top: auto;
-  padding-top: 1rem;
+  padding-top: 0.35rem;
   padding-bottom: 0.5rem;
+}
+
+/* Gear button */
+.gear-btn {
+  width: auto;
+  padding: 0.2rem;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s ease, background 0.15s ease, transform 0.25s ease;
+  flex-shrink: 0;
+}
+
+.gear-btn:hover:not(:disabled) {
+  background: var(--bg-elevated);
+  border-color: transparent;
+  color: var(--text-primary);
+}
+
+.gear-btn.active {
+  color: var(--accent-green-strong);
+}
+
+.gear-btn.active svg {
+  animation: gear-spin 3s linear infinite;
+}
+
+@keyframes gear-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* UDP Forwarding Panel */
+.udp-forward-panel {
+  overflow: hidden;
+  animation: slide-down 0.2s ease;
+}
+
+@keyframes slide-down {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.udp-forward-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.4rem;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.udp-forward-fields {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
+
+.udp-forward-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  flex: 1;
+}
+
+.udp-forward-row:first-child {
+  flex: 2;
+}
+
+.udp-field-label {
+  font-size: 0.68rem;
+  color: var(--text-dim);
+  font-weight: 500;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding-left: 0.1rem;
 }
