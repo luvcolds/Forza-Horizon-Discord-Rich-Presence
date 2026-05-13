@@ -35,3 +35,10 @@ Windows blocks UWP apps from sending data to local programs. If you play the Mic
 - **SimHub:** Fully compatible with SimHub and other software that uses your forza telemetry.
 - **OpenXBL:** Update frequency is optimized to preserve your free API limits.
 - **100% Safe:** No game file modifications or memory hooking/reading involved.
+
+## Acknowledgements
+
+- **CringeGaming** — for testing assistance during development
+- **MrCoolAndroid** — author of [Xbox Rich Presence Discord](https://github.com/MrCoolAndroid/Xbox-Rich-Presence-Discord). Idea to use OpenXBL for the Rich Presence status
+- **jaaiden** — author of [FH5RP](https://github.com/jaaiden/FH5RP) and [FH4RP](https://github.com/jaaiden/FH4RP). Idea to use telemetry for the Discord status
+
