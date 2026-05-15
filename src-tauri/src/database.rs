@@ -49,6 +49,10 @@ impl CarDatabase {
         self.cars.get(&id).cloned().unwrap_or_else(|| format!("Unknown Car ({})", id))
     }
 
+    pub fn get_car_name_opt(&self, id: i32) -> Option<String> {
+        self.cars.get(&id).cloned()
+    }
+
     pub async fn check_for_updates(app_handle: AppHandle) -> Result<String, String> {
         // In a real scenario, this would fetch from a GitHub releases page or ForzaDB API.
         // For demonstration, we simulate an API call.

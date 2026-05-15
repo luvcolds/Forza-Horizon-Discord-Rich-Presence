@@ -88,7 +88,10 @@ impl DiscordService {
             let mut hover_text = String::new();
 
             if let Some(data) = effective_data {
-                let car_name = db.get_car_name(data.car_ordinal);
+                let car_name_opt = db.get_car_name_opt(data.car_ordinal);
+                let is_unknown = car_name_opt.is_none();
+                let car_name = car_name_opt.unwrap_or_else(|| format!("Unknown Car ({})", data.car_ordinal));
+                
                 let display_name = if car_name.chars().count() > 25 {
                     let truncated: String = car_name.chars().take(22).collect();
                     format!("{}...", truncated)
@@ -100,13 +103,17 @@ impl DiscordService {
                 let telemetry_str = format!("{} | {} ({})", display_name, class_str, data.car_pi);
 
                 // Car display info is now always shown if effective_data exists
-
+                // BUT skip if the car is unknown (user request)
                 if let Some(xbl) = valid_xbl_state {
                     details_str = xbl.to_string();
-                    state_str = telemetry_str;
+                    if !is_unknown {
+                        state_str = telemetry_str;
+                    }
                 } else {
-                    details_str = car_name.clone();
-                    state_str = format!("{} ({})", class_str, data.car_pi);
+                    if !is_unknown {
+                        details_str = car_name.clone();
+                        state_str = format!("{} ({})", class_str, data.car_pi);
+                    }
                 }
 
                 class_key = format!("class_{}", class_str.to_lowercase());

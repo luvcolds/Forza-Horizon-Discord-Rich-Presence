@@ -377,6 +377,7 @@ fn main() {
                             let xbl_status_clone_loop = xbl_status.clone();
                             let key_clone = xbl_api_key_clone.clone();
                             let app_handle_clone2 = app_handle_clone.clone();
+                            let app_handle_clone3 = app_handle_clone.clone();
                             let module_name = module.game_name().to_string();
                             
                             let (xbl_stop_tx, mut xbl_stop_rx) = tokio::sync::mpsc::channel::<()>(1);
@@ -449,7 +450,26 @@ fn main() {
                                                     if last_update.elapsed() >= Duration::from_millis(1500) {
                                                         let db_lock = db_clone.lock().unwrap();
                                                         let xbl_lock = xbl_status.lock().unwrap();
+                                                        // Update Discord
                                                         discord_service.update_presence(last_telemetry.as_ref(), &db_lock, module_clone.as_ref(), xbl_lock.as_deref());
+                                                        
+                                                        // Emit UI update for unknown cars
+                                                        if let Some(data) = last_telemetry.as_ref() {
+                                                            if data.car_ordinal != 0 {
+                                                                if db_lock.get_car_name_opt(data.car_ordinal).is_none() {
+                                                                    let _ = app_handle_clone3.emit("unknown_car", serde_json::json!({
+                                                                        "id": data.car_ordinal,
+                                                                        "class": module_clone.format_class(data.car_class),
+                                                                        "pi": data.car_pi
+                                                                    }));
+                                                                } else {
+                                                                    // Known car detected, clear warning
+                                                                    let _ = app_handle_clone3.emit("unknown_car", serde_json::Value::Null);
+                                                                }
+                                                            }
+                                                            // If car_ordinal == 0 (pause), we keep previous UI state
+                                                        }
+
                                                         last_update = tokio::time::Instant::now();
                                                     }
                                                 }
@@ -461,6 +481,22 @@ fn main() {
                                             let db_lock = db_clone.lock().unwrap();
                                             let xbl_lock = xbl_status.lock().unwrap();
                                             discord_service.update_presence(last_telemetry.as_ref(), &db_lock, module_clone.as_ref(), xbl_lock.as_deref());
+                                            
+                                            // Handle unknown car in UI even during timeout
+                                            if let Some(data) = last_telemetry.as_ref() {
+                                                if data.car_ordinal != 0 {
+                                                    if db_lock.get_car_name_opt(data.car_ordinal).is_none() {
+                                                        let _ = app_handle_clone3.emit("unknown_car", serde_json::json!({
+                                                            "id": data.car_ordinal,
+                                                            "class": module_clone.format_class(data.car_class),
+                                                            "pi": data.car_pi
+                                                        }));
+                                                    } else {
+                                                        let _ = app_handle_clone3.emit("unknown_car", serde_json::Value::Null);
+                                                    }
+                                                }
+                                            }
+
                                             last_update = tokio::time::Instant::now();
                                         }
                                     }
@@ -473,6 +509,8 @@ fn main() {
                         is_game_running = false;
                         *active_game.lock().unwrap() = None;
                         println!("Game stopped.");
+                        
+                        let _ = app_handle_clone.emit("unknown_car", serde_json::Value::Null);
                         
                         telemetry_server_clone.stop();
                         *telemetry_tx_clone.lock().unwrap() = None;

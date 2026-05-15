@@ -160,7 +160,7 @@ document.addEventListener("DOMContentLoaded", () => {
       statusText.textContent = `${game}`;
       statusText.style.color = "var(--success-color)";
       statusDetail.textContent = details || "Broadcasting presence to Discord.";
-      
+
       const xblText = document.getElementById("xbl-status-text");
       if (xbl_status) {
         xblText.textContent = xbl_status;
@@ -174,11 +174,11 @@ document.addEventListener("DOMContentLoaded", () => {
       statusText.textContent = "Waiting...";
       statusText.style.color = "inherit";
       statusDetail.textContent = details || "Launch game to broadcast";
-      
+
       const xblText = document.getElementById("xbl-status-text");
       const hasXblKey = !!localStorage.getItem("xbl_api_key");
       xblText.textContent = xbl_status || (hasXblKey ? "Waiting for game..." : "Disconnected");
-      
+
       if (xbl_status && (xbl_status.includes("Error:") || xbl_status.includes("error:"))) {
         xblText.style.color = "var(--error-color)";
       } else {
@@ -199,18 +199,18 @@ document.addEventListener("DOMContentLoaded", () => {
     xblKeyInput.addEventListener("blur", async () => {
       const key = xblKeyInput.value.trim();
       const currentSavedKey = localStorage.getItem("xbl_api_key") || "";
-      
+
       if (key !== currentSavedKey) {
         localStorage.setItem("xbl_api_key", key);
         try {
           await invoke("update_xbl_settings", { apiKey: key });
-          
+
           // Show indicator
           xblSavedIndicator.classList.add("visible");
           setTimeout(() => {
             xblSavedIndicator.classList.remove("visible");
           }, 2000);
-          
+
           if (!key) {
             document.getElementById("xbl-status-text").textContent = "Disconnected";
           }
@@ -229,13 +229,13 @@ document.addEventListener("DOMContentLoaded", () => {
     portInput.addEventListener("blur", async () => {
       const portVal = parseInt(portInput.value) || 8001;
       const currentSavedPort = localStorage.getItem("telemetry_port") || "8001";
-      
+
       // Only save if changed
       if (portVal.toString() !== currentSavedPort) {
         localStorage.setItem("telemetry_port", portVal.toString());
         try {
           await invoke("update_telemetry_port", { port: portVal });
-          
+
           // Show indicator
           portSavedIndicator.classList.add("visible");
           setTimeout(() => {
@@ -354,11 +354,11 @@ document.addEventListener("DOMContentLoaded", () => {
       const isLocalhost = ip === "127.0.0.1" || ip === "localhost" || ip === "0.0.0.0";
       if (isLocalhost && port === telemetryPort) {
         console.error("Infinite loop prevented: Cannot forward to the same telemetry port!");
-        
+
         // Show visual feedback that this is invalid
         relayPortInput.style.borderColor = "var(--error-color, #ff4d4d)";
         setTimeout(() => relayPortInput.style.borderColor = "", 2000);
-        
+
         // Force toggle off and disable relay
         if (relayActiveToggle.checked) {
           relayActiveToggle.checked = false;
@@ -399,6 +399,18 @@ document.addEventListener("DOMContentLoaded", () => {
     // Apply saved relay settings on startup if toggle is on (even if panel is closed)
     if (relayActive) {
       applyRelaySettings().catch(console.error);
+    }
+  });
+
+  // Listen for unknown car warnings
+  const unknownCarWarning = document.getElementById("unknown-car-warning");
+  listen("unknown_car", (event) => {
+    const data = event.payload;
+    if (data) {
+      unknownCarWarning.textContent = `Unknown car detected: ID ${data.id} (${data.class} ${data.pi}). Please report this!`;
+      unknownCarWarning.classList.remove("invisible");
+    } else {
+      unknownCarWarning.classList.add("invisible");
     }
   });
 

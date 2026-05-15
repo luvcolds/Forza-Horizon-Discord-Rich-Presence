@@ -499,12 +499,27 @@ button:hover:not(:disabled) {
   font-weight: 500;
 }
 
-footer {
+.footer-area {
   text-align: center;
   color: var(--text-dim);
   font-size: 0.75rem;
-  padding-top: 0.35rem;
+  margin-top: -0.8rem;
   padding-bottom: 0.5rem;
+}
+
+.unknown-car-warning {
+  color: var(--error-color);
+  font-weight: 700;
+  font-size: 0.8rem;
+  height: 1.1rem;
+  line-height: 1.1rem;
+  margin-bottom: 0;
+  transition: opacity 0.2s ease;
+}
+
+.unknown-car-warning.invisible {
+  opacity: 0;
+  pointer-events: none;
 }
 
 /* Gear button */
