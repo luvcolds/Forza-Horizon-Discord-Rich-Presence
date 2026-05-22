@@ -232,84 +232,26 @@ fn open_url(url: String) {
 }
 
 #[tauri::command]
-fn toggle_autostart(enable: bool) -> Result<String, String> {
-    #[cfg(target_os = "windows")]
-    {
-        let exe_path = std::env::current_exe().map_err(|e| e.to_string())?;
-        let exe_path_str = exe_path.to_str().unwrap_or_default();
-
-        let key_path = r#"HKCU\Software\Microsoft\Windows\CurrentVersion\Run"#;
-        let app_name = "forzarichpresence";
-
-        if enable {
-            let status = std::process::Command::new("reg")
-                .args(&["add", key_path, "/v", app_name, "/t", "REG_SZ", "/d", &format!("\"{}\"", exe_path_str), "/f"])
-                .creation_flags(0x08000000)
-                .status()
-                .map_err(|e| e.to_string())?;
-
-            if status.success() { return Ok("Enabled".into()); } else { return Err("Failed".into()); }
-        } else {
-            let status = std::process::Command::new("reg")
-                .args(&["delete", key_path, "/v", app_name, "/f"])
-                .creation_flags(0x08000000)
-                .status()
-                .map_err(|e| e.to_string())?;
-
-            if status.success() { return Ok("Disabled".into()); } else { return Err("Failed".into()); }
-        }
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        let autostart_dir = std::env::var("HOME")
-            .map(|h| std::path::PathBuf::from(h).join(".config").join("autostart"))
-            .map_err(|_| "Could not find HOME directory".to_string())?;
-        let desktop_file = autostart_dir.join("forzarichpresence.desktop");
-
-        if enable {
-            let exe_path = std::env::var("APPIMAGE")
-            .map(std::path::PathBuf::from)
-            .or_else(|_| std::env::current_exe().map_err(|e| e.to_string()))?;
-            std::fs::create_dir_all(&autostart_dir).map_err(|e| e.to_string())?;
-            let contents = format!(
-                "[Desktop Entry]\nType=Application\nName=Forza Rich Presence\nExec={}\nHidden=false\nNoDisplay=false\nX-GNOME-Autostart-enabled=true\n",
-                exe_path.display()
-            );
-            std::fs::write(&desktop_file, contents).map_err(|e| e.to_string())?;
-            Ok("Enabled".into())
-        } else {
-            if desktop_file.exists() {
-                std::fs::remove_file(&desktop_file).map_err(|e| e.to_string())?;
-            }
-            Ok("Disabled".into())
-        }
+fn toggle_autostart(enable: bool, app: tauri::AppHandle) -> Result<String, String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let autostart_manager = app.autolaunch();
+    if enable {
+        autostart_manager.enable()
+            .map_err(|e| e.to_string())?;
+        Ok("Enabled".into())
+    } else {
+        autostart_manager.disable()
+            .map_err(|e| e.to_string())?;
+        Ok("Disabled".into())
     }
 }
 
 #[tauri::command]
-fn is_autostart_enabled() -> Result<bool, String> {
-    #[cfg(target_os = "windows")]
-    {
-        let key_path = r#"HKCU\Software\Microsoft\Windows\CurrentVersion\Run"#;
-        let app_name = "forzarichpresence";
-
-        let output = std::process::Command::new("reg")
-            .args(&["query", key_path, "/v", app_name])
-            .creation_flags(0x08000000)
-            .output()
-            .map_err(|e: std::io::Error| e.to_string())?;
-
-        return Ok(output.status.success());
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        let desktop_file = std::env::var("HOME")
-            .map(|h| std::path::PathBuf::from(h).join(".config").join("autostart").join("forzarichpresence.desktop"))
-            .map_err(|_| "Could not find HOME directory".to_string())?;
-        Ok(desktop_file.exists())
-    }
+fn is_autostart_enabled(app: tauri::AppHandle) -> Result<bool, String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let autostart_manager = app.autolaunch();
+    autostart_manager.is_enabled()
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -402,6 +344,10 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec![]),
+        ))
         .setup(|app| {
             create_tray(app)?;
 
